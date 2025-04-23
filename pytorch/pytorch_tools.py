@@ -17,16 +17,16 @@ from torchmetrics import MeanSquaredError, MeanAbsoluteError
 
 class CreateDataset(Dataset):
     def __init__(self, X, y, scaler='StandardScaler'):        
-        self.X = X
-        self.y = y
+        self.X = X.reset_index(drop=True)
+        self.y = y.reset_index(drop=True)
         self.scaler = None
-        
+
         if scaler == 'StandardScaler':
             self.scaler = StandardScaler()
             self.X = self.scaler.fit_transform(self.X)
         elif scaler == 'MinMaxScaler':
-        	self.scaler = MinMaxScaler()
-        	self.X = self.scaler.fit_transform(self.X)
+            self.scaler = MinMaxScaler()
+            self.X = self.scaler.fit_transform(self.X)
 
     def __len__(self):
         return len(self.y)
