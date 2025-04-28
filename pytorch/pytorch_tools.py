@@ -25,13 +25,9 @@ from albumentations.pytorch import ToTensorV2
 
 
 class CreateDataset(Dataset):
-    def __init__(self, X, y, scaler='StandardScaler'):    
-        try:    
-            self.X = X.reset_index(drop=True)
-            self.y = y.reset_index(drop=True)
-        except:
-            self.X = X
-            self.y = y
+    def __init__(self, X, y, scaler='StandardScaler'):        
+        self.X = X
+        self.y = y
         self.scaler = None
 
         if scaler == 'StandardScaler':
@@ -51,7 +47,7 @@ class CreateDataset(Dataset):
         return X, y
 
 
-class CreateDataset_img(Dataset):
+class CreateDataset_2(Dataset):
     def __init__(self, data_dir, transform, augmentations_per_image=5):
         self.original_filenames = [
             os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.jpg')
@@ -79,6 +75,44 @@ class CreateDataset_img(Dataset):
             image = self.transform(image=image)['image']
         
         return image, self.final_labels[idx]
+
+
+class CreateDataset_3(Dataset):
+    def __init__(self, root_dir, transform=None, augmentations_per_image=5):
+        self.transform = transform
+        self.augmentations_per_image = augmentations_per_image
+        self.filenames = []
+        self.labels = []
+        
+        classes = sorted(os.listdir(root_dir))
+        self.class_to_idx = {cls_name: idx for idx, cls_name in enumerate(classes, start=0) if cls_name != '.DS_Store'}
+        
+        for cls_name in self.class_to_idx:
+            cls_path = os.path.join(root_dir, cls_name)
+            if not os.path.isdir(cls_path):
+                continue
+            for fname in os.listdir(cls_path):
+                if fname.endswith('.jpg') and fname != '.DS_Store':
+                    filepath = os.path.join(cls_path, fname)
+                    self.filenames.append(filepath)
+                    self.labels.append(self.class_to_idx[cls_name])
+                    for _ in range(self.augmentations_per_image):
+                        self.filenames.append(filepath)
+                        self.labels.append(self.class_to_idx[cls_name])
+
+        if min(self.labels) != 0:
+            self.labels = [label - min(self.labels) for label in self.labels]
+
+    def __len__(self):
+        return len(self.filenames)
+
+    def __getitem__(self, idx):
+        image = Image.open(self.filenames[idx]).convert('RGB')
+        
+        if self.transform:
+            image = self.transform(image)
+            
+        return image, self.labels[idx]
 
 
 def show_augmentations(transformer, filenames):
@@ -152,8 +186,10 @@ def train_model_cls(num_classes, num_epoch,
             targets = targets.float() if num_classes == 2 else targets.long()
             
             outputs = model(inputs)
-            if num_classes == 2 and isinstance(criterion, (torch.nn.BCELoss, torch.nn.BCEWithLogitsLoss)):
+            if num_classes == 2 and isinstance(criterion, (torch.nn.BCELoss, torch.nn.BCEWithLogitsLoss)) or outputs.shape[1] == 1:
                 outputs = outputs.squeeze()
+            elif num_classes == 2 and isinstance(criterion, nn.CrossEntropyLoss):
+                outputs = outputs[:, 1]
             
             loss = criterion(outputs, targets)
             
@@ -198,8 +234,10 @@ def train_model_cls(num_classes, num_epoch,
                 targets = targets.float() if num_classes == 2 else targets.long()
                 
                 outputs = model(inputs)
-                if num_classes == 2 and isinstance(criterion, (torch.nn.BCELoss, torch.nn.BCEWithLogitsLoss)):
+                if num_classes == 2 and isinstance(criterion, (torch.nn.BCELoss, torch.nn.BCEWithLogitsLoss)) or outputs.shape[1] == 1:
                     outputs = outputs.squeeze()
+                elif num_classes == 2 and isinstance(criterion, nn.CrossEntropyLoss):
+                    outputs = outputs[:, 1]
                 
                 loss = criterion(outputs, targets)
                 
