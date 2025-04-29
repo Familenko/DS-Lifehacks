@@ -145,7 +145,8 @@ def train_model_cls(num_classes, num_epoch,
                     train_dataloader, test_dataloader, 
                     model, criterion, optimizer,
                     device=None,
-                    info_every_iter=1, show_val_metrics=False):
+                    info_every_iter=1, show_val_metrics=False,
+                    callbacks=[]):
     
     if device is None:
         device = torch.device('cpu')
@@ -172,7 +173,13 @@ def train_model_cls(num_classes, num_epoch,
         val_recall = MulticlassRecall(num_classes=num_classes, average='macro').to(device)
         val_precision = MulticlassPrecision(num_classes=num_classes, average='macro').to(device)
 
+    early_stop = False
+
     for epoch in tqdm(range(num_epoch)):
+
+        if early_stop:
+            break
+
         model.train()
         train_accuracy.reset()
         train_recall.reset()
@@ -219,7 +226,6 @@ def train_model_cls(num_classes, num_epoch,
                   f"Rec: {train_rec:.4f} " +
                   f"Prec: {train_prec:.4f}")
         
-        # Evaluation
         model.eval()
         val_accuracy.reset()
         val_recall.reset()
@@ -263,6 +269,12 @@ def train_model_cls(num_classes, num_epoch,
                       f"Acc: {test_acc:.4f} " +
                       f"Rec: {test_rec:.4f} " +
                       f"Prec: {test_prec:.4f}")
+                
+        if callbacks:
+            for cb in callbacks:
+                cb.on_epoch_end(epoch, metrics, model)
+                if hasattr(cb, 'early_stop') and cb.early_stop:
+                    early_stop = True
     
     return dict(metrics), model
 
@@ -271,7 +283,8 @@ def train_model_reg(num_epoch,
                     train_dataloader, test_dataloader, 
                     model, criterion, optimizer,
                     device=None,
-                    info_every_iter=1, show_val_metrics=False):
+                    info_every_iter=1, show_val_metrics=False,
+                    callback=None):
 
     if device is None:
         device = torch.device("cpu")
@@ -320,7 +333,6 @@ def train_model_reg(num_epoch,
                   f"MAE: {train_mae:.4f} " +
                   f"RMSE: {np.sqrt(train_mse):.4f}")
 
-        # Validation
         model.eval()
         val_loss = 0.0
         
@@ -356,6 +368,11 @@ def train_model_reg(num_epoch,
                       f"MSE: {val_mse:.4f} " +
                       f"MAE: {val_mae:.4f} " +
                       f"RMSE: {np.sqrt(val_mse):.4f}")
+                
+        if callback.early_stop:
+            break
+        if callback:
+            callback.on_epoch_end(epoch, metrics)
     
     return dict(metrics), model
 
