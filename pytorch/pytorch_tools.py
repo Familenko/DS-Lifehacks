@@ -284,7 +284,7 @@ def train_model_reg(num_epoch,
                     model, criterion, optimizer,
                     device=None,
                     info_every_iter=1, show_val_metrics=False,
-                    callback=None):
+                    callbacks=[]):
 
     if device is None:
         device = torch.device("cpu")
@@ -294,7 +294,13 @@ def train_model_reg(num_epoch,
     
     metrics = defaultdict(list)
 
+    early_stop = False
+
     for epoch in tqdm(range(num_epoch)):
+
+        if early_stop:
+            break
+
         model.train()
         train_loss = 0.0
         
@@ -369,10 +375,11 @@ def train_model_reg(num_epoch,
                       f"MAE: {val_mae:.4f} " +
                       f"RMSE: {np.sqrt(val_mse):.4f}")
                 
-        if callback.early_stop:
-            break
-        if callback:
-            callback.on_epoch_end(epoch, metrics)
+        if callbacks:
+            for cb in callbacks:
+                cb.on_epoch_end(epoch, metrics, model)
+                if hasattr(cb, 'early_stop') and cb.early_stop:
+                    early_stop = True
     
     return dict(metrics), model
 
