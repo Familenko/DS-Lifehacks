@@ -1,5 +1,3 @@
-import math
-
 import matplotlib.pyplot as plt
 
 import torch
@@ -120,10 +118,19 @@ class LRSchedulerCallback(Callback):
         self.lr.append(new_lr)
         self.loss.append(metrics['train_loss'][-1])
 
-    def plot_lr(self, view = 10):
+    def plot_lr(self, x1=None, x2=None, y1=None, y2=None):
 
         plt.figure(figsize=(10, 6))
         plt.grid(True)
         plt.semilogx(self.lr, self.loss)
-        plt.tick_params('both', length=10, width=1, which='both')
-        plt.axis([self.lr_min, self.lr_max , 0, view])
+        plt.xlabel("Learning Rate")
+        plt.ylabel("Loss")
+        plt.title("Learning Rate Finder")
+
+        x_min = x1 if x1 is not None else self.lr_min
+        x_max = x2 if x2 is not None else self.lr_max
+        y_min = y1 if y1 is not None else 0
+        y_max = y2 if y2 is not None else max(self.loss) * 1.1
+
+        plt.axis([x_min, x_max, y_min, y_max])
+        plt.show()
