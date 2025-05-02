@@ -1,3 +1,7 @@
+import math
+
+import matplotlib.pyplot as plt
+
 import torch
 from IPython.display import display, HTML
 from abc import ABC, abstractmethod
@@ -87,3 +91,39 @@ class ReduceLROnPlateauCallback(Callback):
                 param_group['lr'] = new_lr
                 cprint(f"Learning rate reduced on epoch {epoch + 1} from {old_lr:.6f} to {new_lr:.6f}.", color="orange", bold=False)
             self.counter = 0
+
+
+class LRSchedulerCallback(Callback):
+    def __init__(self, optimizer, lr_min=1e-5, lr_max=1e-3, epochs_total=100, growth_rate=10):
+        self.optimizer = optimizer
+        self.lr_min = lr_min
+        self.lr_max = lr_max
+        self.epochs_total = epochs_total
+        self.growth_rate = growth_rate
+
+        self.lr = []
+        self.loss = []
+
+    def schedule(self, epoch):
+        progress = epoch / self.epochs_total
+        lr = self.lr_min * (self.lr_max / self.lr_min) ** (progress ** self.growth_rate)
+        return lr
+
+    def on_epoch_end(self, epoch, metrics, model):
+        new_lr = self.schedule(epoch)
+
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = new_lr
+
+        metrics['lr'].append(new_lr)
+
+        self.lr.append(new_lr)
+        self.loss.append(metrics['train_loss'][-1])
+
+    def plot_lr(self, view = 10):
+
+        plt.figure(figsize=(10, 6))
+        plt.grid(True)
+        plt.semilogx(self.lr, self.loss)
+        plt.tick_params('both', length=10, width=1, which='both')
+        plt.axis([self.lr_min, self.lr_max , 0, view])

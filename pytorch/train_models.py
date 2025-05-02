@@ -92,6 +92,8 @@ class Trainer(ABC):
                         axs[i].plot(self.metrics[test_key], label=f'Test {metric_name}')
                         axs[i].set_title(metric_name.capitalize())
                         axs[i].legend()
+                else:
+                    continue
 
             for j in range(i + 1, len(axs)):
                 axs[j].axis('off')
