@@ -18,11 +18,50 @@ from torchmetrics import MeanSquaredError, MeanAbsoluteError
 
 class Trainer(ABC):
     def __init__(self):
-        self.metrics = {}
+        self.metrics = defaultdict(list)
+        self.early_stop = False
 
     @abstractmethod
-    def fit(self, *args, **kwargs):
+    def _init_metrics(self):
         pass
+    @abstractmethod
+    def _reset_metrics(self):
+        pass
+    @abstractmethod
+    def _update_metrics(self, train_loss, test_loss, len_train_data, len_test_data):
+        pass
+    @abstractmethod
+    def _print_metrics(self, epoch, info_every_iter, num_epoch, show_val_metrics):
+        pass
+
+    @abstractmethod
+    def _train_step(self, train_dataloader):
+        pass
+    @abstractmethod
+    def _eval_step(self, test_dataloader):
+        pass
+
+    @abstractmethod
+    def _callback_process(self, epoch):
+        pass
+
+    def fit(self, train_dataloader, test_dataloader, num_epoch=10, info_every_iter=1, show_val_metrics=True):
+        for epoch in tqdm(range(num_epoch)):
+
+            if self.early_stop:
+                break
+
+            self._reset_metrics()
+
+            train_loss = self._train_step(train_dataloader)
+            test_loss = self._eval_step(test_dataloader)
+
+            self._update_metrics(train_loss, test_loss, 
+                                len(train_dataloader.dataset), len(test_dataloader.dataset))
+            
+            self._print_metrics(epoch, info_every_iter, num_epoch, show_val_metrics)
+
+            self._callback_process(epoch)
 
     def plot_metrics(self, metric=None):
         if metric:
@@ -65,6 +104,8 @@ class ClassifierTrainer(Trainer):
     def __init__(self,model, criterion, optimizer,
                  num_classes, device = None, callbacks: list = None):
         
+        super().__init__()
+
         self.num_classes = num_classes
         self.device = device if device else torch.device('cpu')
 
@@ -78,8 +119,6 @@ class ClassifierTrainer(Trainer):
         self.early_stop = False
 
     def _init_metrics(self):
-        self.metrics = defaultdict(list)
-        
         metrics_device = torch.device("cpu")
 
         if self.num_classes == 2:
@@ -106,6 +145,43 @@ class ClassifierTrainer(Trainer):
         self.val_accuracy.reset()
         self.val_recall.reset()
         self.val_precision.reset()
+
+    def _update_metrics(self, train_loss, test_loss, len_train_data, len_test_data):
+        train_loss /= len_train_data
+        train_acc = self.train_accuracy.compute().item()
+        train_rec = self.train_recall.compute().item()
+        train_prec = self.train_precision.compute().item()
+        
+        self.metrics['train_loss'].append(train_loss)
+        self.metrics['train_accuracy'].append(train_acc)
+        self.metrics['train_recalls'].append(train_rec)
+        self.metrics['train_precisions'].append(train_prec)
+
+        test_loss /= len_test_data
+        test_acc = self.val_accuracy.compute().item()
+        test_rec = self.val_recall.compute().item()
+        test_prec = self.val_precision.compute().item()
+        
+        self.metrics['test_loss'].append(test_loss)
+        self.metrics['test_accuracy'].append(test_acc)
+        self.metrics['test_recalls'].append(test_rec)
+        self.metrics['test_precisions'].append(test_prec)
+
+    def _print_metrics(self, epoch, info_every_iter, num_epoch, show_val_metrics):
+
+        if (epoch + 1) % info_every_iter == 0:
+            print(f"Epoch [{epoch + 1}/{num_epoch}] " +
+                    f"Train Loss: {self.metrics['train_loss'][-1]:.4f} " +
+                    f"Acc: {self.metrics['train_accuracy'][-1]:.4f} " +
+                    f"Rec: {self.metrics['train_recalls'][-1]:.4f} " +
+                    f"Prec: {self.metrics['train_precisions'][-1]:.4f}")
+                
+            if show_val_metrics:
+                print(f"Epoch [{epoch + 1}/{num_epoch}] " +
+                        f"Val Loss: {self.metrics['test_loss'][-1]:.4f} " +
+                        f"Acc: {self.metrics['test_accuracy'][-1]:.4f} " +
+                        f"Rec: {self.metrics['test_recalls'][-1]:.4f} " +
+                        f"Prec: {self.metrics['test_precisions'][-1]:.4f}")
 
     def _define_outputs(self, outputs):
         if self.num_classes == 2 and isinstance(self.criterion, (torch.nn.BCELoss, torch.nn.BCEWithLogitsLoss)) or outputs.shape[1] == 1:
@@ -162,43 +238,6 @@ class ClassifierTrainer(Trainer):
 
         return test_loss
 
-    def _update_metrics(self, train_loss, test_loss, len_train_data, len_test_data):
-        train_loss /= len_train_data
-        train_acc = self.train_accuracy.compute().item()
-        train_rec = self.train_recall.compute().item()
-        train_prec = self.train_precision.compute().item()
-        
-        self.metrics['train_loss'].append(train_loss)
-        self.metrics['train_accuracy'].append(train_acc)
-        self.metrics['train_recalls'].append(train_rec)
-        self.metrics['train_precisions'].append(train_prec)
-
-        test_loss /= len_test_data
-        test_acc = self.val_accuracy.compute().item()
-        test_rec = self.val_recall.compute().item()
-        test_prec = self.val_precision.compute().item()
-        
-        self.metrics['test_loss'].append(test_loss)
-        self.metrics['test_accuracy'].append(test_acc)
-        self.metrics['test_recalls'].append(test_rec)
-        self.metrics['test_precisions'].append(test_prec)
-
-    def _print_metrics(self, epoch, info_every_iter, num_epoch, show_val_metrics):
-
-        if (epoch + 1) % info_every_iter == 0:
-            print(f"Epoch [{epoch + 1}/{num_epoch}] " +
-                    f"Train Loss: {self.metrics['train_loss'][-1]:.4f} " +
-                    f"Acc: {self.metrics['train_accuracy'][-1]:.4f} " +
-                    f"Rec: {self.metrics['train_recalls'][-1]:.4f} " +
-                    f"Prec: {self.metrics['train_precisions'][-1]:.4f}")
-                
-            if show_val_metrics:
-                print(f"Epoch [{epoch + 1}/{num_epoch}] " +
-                        f"Val Loss: {self.metrics['test_loss'][-1]:.4f} " +
-                        f"Acc: {self.metrics['test_accuracy'][-1]:.4f} " +
-                        f"Rec: {self.metrics['test_recalls'][-1]:.4f} " +
-                        f"Prec: {self.metrics['test_precisions'][-1]:.4f}")
-
     def _callback_process(self, epoch):
         if self.callbacks:
             for cb in self.callbacks:
@@ -206,28 +245,12 @@ class ClassifierTrainer(Trainer):
                 if hasattr(cb, 'early_stop') and cb.early_stop:
                     self.early_stop = True
 
-    def fit(self, train_dataloader, test_dataloader, num_epoch=10, info_every_iter=1, show_val_metrics=True):
-        for epoch in tqdm(range(num_epoch)):
-
-            if self.early_stop:
-                break
-
-            self._reset_metrics()
-
-            train_loss = self._train_step(train_dataloader)
-            test_loss = self._eval_step(test_dataloader)
-
-            self._update_metrics(train_loss, test_loss, 
-                                len(train_dataloader.dataset), len(test_dataloader.dataset))
-            
-            self._print_metrics(epoch, info_every_iter, num_epoch, show_val_metrics)
-
-            self._callback_process(epoch)
-
 
 class RegressorTrainer(Trainer):
     def __init__(self, model, criterion, optimizer, 
                  device=None, callbacks: list = None):
+        
+        super().__init__()
         
         self.device = device if device else torch.device('cpu')
 
@@ -255,6 +278,40 @@ class RegressorTrainer(Trainer):
         self.train_mae.reset()
         self.val_mse.reset()
         self.val_mae.reset()
+
+    def _update_metrics(self, train_loss, test_loss, len_train_data, len_test_data):
+        train_loss /= len_train_data
+        train_mse = self.train_mse.compute().item()
+        train_mae = self.train_mae.compute().item()
+
+        test_loss /= len_test_data
+        val_mse = self.val_mse.compute().item()
+        val_mae = self.val_mae.compute().item()
+
+        self.metrics['train_loss'].append(train_loss)
+        self.metrics['train_mse'].append(train_mse)
+        self.metrics['train_mae'].append(train_mae)
+        self.metrics['train_rmse'].append(np.sqrt(train_mse))
+
+        self.metrics['test_loss'].append(test_loss)
+        self.metrics['test_mse'].append(val_mse)
+        self.metrics['test_mae'].append(val_mae)
+        self.metrics['test_rmse'].append(np.sqrt(val_mse))
+
+    def _print_metrics(self, epoch, info_every_iter, num_epoch, show_val_metrics):
+        if (epoch + 1) % info_every_iter == 0:
+            print(f"Epoch [{epoch + 1}/{num_epoch}] "
+                  f"Train Loss: {self.metrics['train_loss'][-1]:.4f} "
+                  f"MSE: {self.metrics['train_mse'][-1]:.4f} "
+                  f"MAE: {self.metrics['train_mae'][-1]:.4f} "
+                  f"RMSE: {self.metrics['train_rmse'][-1]:.4f}")
+
+            if show_val_metrics:
+                print(f"Epoch [{epoch + 1}/{num_epoch}] "
+                      f"Val Loss: {self.metrics['test_loss'][-1]:.4f} "
+                      f"MSE: {self.metrics['test_mse'][-1]:.4f} "
+                      f"MAE: {self.metrics['test_mae'][-1]:.4f} "
+                      f"RMSE: {self.metrics['test_rmse'][-1]:.4f}")
 
     def _train_step(self, train_dataloader):
         self.model.train()
@@ -297,56 +354,8 @@ class RegressorTrainer(Trainer):
 
         return val_loss
 
-    def _update_metrics(self, train_loss, val_loss, len_train, len_val):
-        train_loss /= len_train
-        train_mse = self.train_mse.compute().item()
-        train_mae = self.train_mae.compute().item()
-
-        val_loss /= len_val
-        val_mse = self.val_mse.compute().item()
-        val_mae = self.val_mae.compute().item()
-
-        self.metrics['train_loss'].append(train_loss)
-        self.metrics['train_mse'].append(train_mse)
-        self.metrics['train_mae'].append(train_mae)
-        self.metrics['train_rmse'].append(np.sqrt(train_mse))
-
-        self.metrics['test_loss'].append(val_loss)
-        self.metrics['test_mse'].append(val_mse)
-        self.metrics['test_mae'].append(val_mae)
-        self.metrics['test_rmse'].append(np.sqrt(val_mse))
-
-    def _print_metrics(self, epoch, info_every_iter, num_epoch, show_val_metrics):
-        if (epoch + 1) % info_every_iter == 0:
-            print(f"Epoch [{epoch + 1}/{num_epoch}] "
-                  f"Train Loss: {self.metrics['train_loss'][-1]:.4f} "
-                  f"MSE: {self.metrics['train_mse'][-1]:.4f} "
-                  f"MAE: {self.metrics['train_mae'][-1]:.4f} "
-                  f"RMSE: {self.metrics['train_rmse'][-1]:.4f}")
-
-            if show_val_metrics:
-                print(f"Epoch [{epoch + 1}/{num_epoch}] "
-                      f"Val Loss: {self.metrics['test_loss'][-1]:.4f} "
-                      f"MSE: {self.metrics['test_mse'][-1]:.4f} "
-                      f"MAE: {self.metrics['test_mae'][-1]:.4f} "
-                      f"RMSE: {self.metrics['test_rmse'][-1]:.4f}")
-
     def _callback_process(self, epoch):
         for cb in self.callbacks:
             cb.on_epoch_end(epoch, self.metrics, self.model)
             if hasattr(cb, 'early_stop') and cb.early_stop:
                 self.early_stop = True
-
-    def fit(self, train_dataloader, test_dataloader, num_epoch=10, info_every_iter=1, show_val_metrics=True):
-        for epoch in tqdm(range(num_epoch)):
-            if self.early_stop:
-                break
-
-            self._reset_metrics()
-
-            train_loss = self._train_step(train_dataloader)
-            val_loss = self._eval_step(test_dataloader)
-
-            self._update_metrics(train_loss, val_loss, len(train_dataloader.dataset), len(test_dataloader.dataset))
-            self._print_metrics(epoch, info_every_iter, num_epoch, show_val_metrics)
-            self._callback_process(epoch)
