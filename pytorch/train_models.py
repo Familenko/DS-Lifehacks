@@ -118,8 +118,6 @@ class ClassifierTrainer(Trainer):
 
         self._init_metrics()
 
-        self.early_stop = False
-
     def _init_metrics(self):
         metrics_device = torch.device("cpu")
 
@@ -262,8 +260,6 @@ class RegressorTrainer(Trainer):
         self.callbacks = callbacks
 
         self._init_metrics()
-
-        self.early_stop = False
 
     def _init_metrics(self):
         self.metrics = defaultdict(list)
