@@ -102,7 +102,7 @@ class Trainer(ABC):
 
 class ClassifierTrainer(Trainer):
     def __init__(self,model, criterion, optimizer,
-                 num_classes, device = None, callbacks: list = None):
+                 num_classes, device = None, callbacks: list = []):
         
         super().__init__()
 
@@ -248,7 +248,7 @@ class ClassifierTrainer(Trainer):
 
 class RegressorTrainer(Trainer):
     def __init__(self, model, criterion, optimizer, 
-                 device=None, callbacks: list = None):
+                 device=None, callbacks: list = []):
         
         super().__init__()
         

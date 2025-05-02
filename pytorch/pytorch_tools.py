@@ -3,6 +3,7 @@ import os
 import random
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -37,14 +38,31 @@ class CreateDataset(Dataset):
             self.scaler = MinMaxScaler()
             self.X = self.scaler.fit_transform(self.X)
 
+
     def __len__(self):
         return len(self.y)
 
     def __getitem__(self, idx):
-        X = torch.tensor(self.X[idx], dtype=torch.float32)
-        y = torch.tensor(self.y[idx], dtype=torch.float32)        
+        def to_tensor(x):
+            if isinstance(x, pd.DataFrame):
+                return torch.tensor(x.iloc[idx].values, dtype=torch.float32)
+            elif isinstance(x, pd.Series):
+                return torch.tensor(x.iloc[idx], dtype=torch.float32)
+            elif isinstance(x, np.ndarray):
+                return torch.tensor(x[idx], dtype=torch.float32)
+            elif isinstance(x, torch.Tensor):
+                return x[idx].float()
+            elif isinstance(x, list):
+                return torch.tensor(x[idx], dtype=torch.float32)
+            else:
+                raise TypeError(f"Unsupported type: {type(x)}")
         
+        X = to_tensor(self.X)
+        y = to_tensor(self.y)
+
         return X, y
+
+
 
 
 class CreateDataset_2(Dataset):
