@@ -130,13 +130,14 @@ class ClassifierTrainer(Trainer):
             self.val_recall = BinaryRecall().to(metrics_device)
             self.val_precision = BinaryPrecision().to(metrics_device)
         else:
-            self.train_accuracy = MulticlassAccuracy(num_classes=self.num_classes, average='macro').to(metrics_device)
-            self.train_recall = MulticlassRecall(num_classes=self.num_classes, average='macro').to(metrics_device)
-            self.train_precision = MulticlassPrecision(num_classes=self.num_classes, average='macro').to(metrics_device)
+            self.train_accuracy = MulticlassAccuracy(num_classes=self.num_classes, average='macro', ignore_index=-100).to(metrics_device)
+            self.train_recall = MulticlassRecall(num_classes=self.num_classes, average='macro', ignore_index=-100).to(metrics_device)
+            self.train_precision = MulticlassPrecision(num_classes=self.num_classes, average='macro', ignore_index=-100).to(metrics_device)
 
-            self.val_accuracy = MulticlassAccuracy(num_classes=self.num_classes, average='macro').to(metrics_device)
-            self.val_recall = MulticlassRecall(num_classes=self.num_classes, average='macro').to(metrics_device)
-            self.val_precision = MulticlassPrecision(num_classes=self.num_classes, average='macro').to(metrics_device)
+            self.val_accuracy = MulticlassAccuracy(num_classes=self.num_classes, average='macro', ignore_index=-100).to(metrics_device)
+            self.val_recall = MulticlassRecall(num_classes=self.num_classes, average='macro', ignore_index=-100).to(metrics_device)
+            self.val_precision = MulticlassPrecision(num_classes=self.num_classes, average='macro', ignore_index=-100).to(metrics_device)
+
 
     def _reset_metrics(self):
         self.train_accuracy.reset()
@@ -195,24 +196,46 @@ class ClassifierTrainer(Trainer):
         self.model.train()
         train_loss = 0.0
 
-        for inputs, targets in train_dataloader:
-            inputs, targets = inputs.to(self.device), targets.to(self.device)
-            inputs = inputs.float()
-            targets = targets.float() if self.num_classes == 2 else targets.long()
-            
-            outputs = self.model(inputs)
-            outputs = self._define_outputs(outputs)
-            
-            loss = self.criterion(outputs, targets)
+        for batch in train_dataloader:
+            inputs, targets, attention_mask = self._parse_batch(batch)
             
             self.optimizer.zero_grad()
+            outputs = self.model(inputs, attention_mask=attention_mask) if attention_mask is not None else self.model(inputs)
+
+            # Обробка виходів
+            original_shape = outputs.shape
+            if outputs.dim() == 3:
+                # NER: [batch, seq_len, num_classes]
+                batch_size, seq_len, _ = outputs.shape
+                outputs = outputs.view(batch_size * seq_len, self.num_classes)
+                targets = targets.view(batch_size * seq_len)
+                if attention_mask is not None:
+                    attention_mask = attention_mask.view(-1)
+                    # Фільтрація паддінгів
+                    outputs = outputs[attention_mask.bool()]
+                    targets = targets[attention_mask.bool()]
+            elif outputs.dim() == 2:
+                # Класифікація: [batch, num_classes] або [batch, 1]
+                outputs = self._define_outputs(outputs)
+            else:
+                raise ValueError(f"Unsupported output shape: {original_shape}")
+
+            loss = self.criterion(outputs, targets)
             loss.backward()
             self.optimizer.step()
-            
-            train_loss += loss.item() * inputs.size(0)
-            self.train_accuracy.update(outputs.cpu(), targets.cpu())
-            self.train_recall.update(outputs.cpu(), targets.cpu())
-            self.train_precision.update(outputs.cpu(), targets.cpu())
+
+            batch_size = inputs.size(0)
+            train_loss += loss.item() * batch_size
+
+            # Метрики
+            if outputs.dim() == 1 or outputs.shape[1] == 1:
+                preds = (outputs > 0.5).long()
+            else:
+                preds = outputs.argmax(dim=1)
+
+            self.train_accuracy.update(preds.cpu(), targets.cpu())
+            self.train_recall.update(preds.cpu(), targets.cpu())
+            self.train_precision.update(preds.cpu(), targets.cpu())
 
         return train_loss
 
@@ -221,23 +244,68 @@ class ClassifierTrainer(Trainer):
         test_loss = 0.0
 
         with torch.no_grad():
-            for inputs, targets in test_dataloader:
-                inputs, targets = inputs.to(self.device), targets.to(self.device)
-                inputs = inputs.float()
-                targets = targets.float() if self.num_classes == 2 else targets.long()
-                
-                outputs = self.model(inputs)
-                outputs = self._define_outputs(outputs)
-                
+            for batch in test_dataloader:
+                inputs, targets, attention_mask = self._parse_batch(batch)
+
+                outputs = self.model(inputs, attention_mask=attention_mask) if attention_mask is not None else self.model(inputs)
+                original_shape = outputs.shape
+
+                if outputs.dim() == 3:
+                    # NER: [batch, seq_len, num_classes]
+                    batch_size, seq_len, _ = outputs.shape
+                    outputs = outputs.view(batch_size * seq_len, self.num_classes)
+                    targets = targets.view(batch_size * seq_len)
+
+                    if attention_mask is not None:
+                        attention_mask = attention_mask.view(-1)
+                        outputs = outputs[attention_mask.bool()]
+                        targets = targets[attention_mask.bool()]
+                elif outputs.dim() == 2:
+                    # Класифікація: [batch, num_classes] або [batch, 1]
+                    outputs = self._define_outputs(outputs)
+                else:
+                    raise ValueError(f"Unsupported output shape: {original_shape}")
+
                 loss = self.criterion(outputs, targets)
-                
                 test_loss += loss.item() * inputs.size(0)
-                self.val_accuracy.update(outputs.cpu(), targets.cpu())
-                self.val_recall.update(outputs.cpu(), targets.cpu())
-                self.val_precision.update(outputs.cpu(), targets.cpu())
+
+                # Метрики
+                if outputs.dim() == 1 or outputs.shape[1] == 1:
+                    preds = (outputs > 0.5).long()
+                else:
+                    preds = outputs.argmax(dim=1)
+
+                self.val_accuracy.update(preds.cpu(), targets.cpu())
+                self.val_recall.update(preds.cpu(), targets.cpu())
+                self.val_precision.update(preds.cpu(), targets.cpu())
 
         return test_loss
 
+    def _parse_batch(self, batch):
+        """
+        Універсальна обробка батчу.
+        Повертає (inputs, targets, attention_mask)
+        """
+        if isinstance(batch, dict):
+            inputs = batch['input_ids'].to(self.device)
+            attention_mask = batch.get('attention_mask', None)
+            if attention_mask is not None:
+                attention_mask = attention_mask.to(self.device)
+            targets = batch['labels'].to(self.device)
+        elif len(batch) == 3:
+            inputs, attention_mask, targets = batch
+            inputs, attention_mask, targets = inputs.to(self.device), attention_mask.to(self.device), targets.to(self.device)
+        elif len(batch) == 2:
+            inputs, targets = batch
+            inputs, targets = inputs.to(self.device), targets.to(self.device)
+            attention_mask = None
+        else:
+            raise ValueError("Batch format not supported.")
+
+        inputs = inputs.float()
+        targets = targets.float() if self.num_classes == 2 else targets.long()
+        return inputs, targets, attention_mask
+        
     def _callback_process(self, epoch):
         if self.callbacks:
             for cb in self.callbacks:
